@@ -1,35 +1,29 @@
 using System.Collections;
+using System.Collections.Generic; // List 사용을 위해 추가
 using UnityEngine;
 
 public class EnemySpawner : MonoBehaviour
 {
     [Header("Spawning")]
-    [SerializeField] private string enemyTag = "Enemy";
+    [Tooltip("스폰할 적의 유형(EnemyData) 목록입니다.")]
+    [SerializeField] private List<EnemyData> spawnableEnemyTypes;
     [SerializeField] private float initialSpawnRate = 1.5f;
-    [SerializeField] private float spawnOffset = 0.5f;
+    [Tooltip("코어로부터의 생성 반경(월드 단위)")]
+    [SerializeField] private float spawnRadius = 20f;
 
     [Header("Difficulty Scaling")]
-    [SerializeField] private float difficultyIncreaseInterval = 10f; // 난이도 증가 간격 (초)
-    [SerializeField] private float minSpawnRate = 0.3f; // 최소 생성 간격
-    [SerializeField] private float spawnRateReduction = 0.1f; // 간격마다 감소할 생성 시간
-    [SerializeField] private float initialEnemySpeed = 5f; // 초기 적 속도
-    [SerializeField] private float maxEnemySpeed = 15f; // 최대 적 속도
-    [SerializeField] private float speedIncrease = 0.5f; // 간격마다 증가할 속도
+    [SerializeField] private float difficultyIncreaseInterval = 10f;
+    [SerializeField] private float minSpawnRate = 0.3f;
+    [SerializeField] private float spawnRateReduction = 0.1f;
+    [SerializeField] private float initialEnemySpeed = 5f;
+    [SerializeField] private float maxEnemySpeed = 15f;
+    [SerializeField] private float speedIncrease = 0.5f;
 
-    private Camera mainCamera;
     private float currentSpawnRate;
     private float currentEnemySpeed;
 
     void Start()
     {
-        mainCamera = Camera.main;
-
-        if (mainCamera == null)
-        {
-            Debug.LogError("Main Camera not found! Please tag a camera as 'MainCamera'.");
-            return; // Stop execution if no camera is found
-        }
-
         currentSpawnRate = initialSpawnRate;
         currentEnemySpeed = initialEnemySpeed;
         
@@ -43,15 +37,28 @@ public class EnemySpawner : MonoBehaviour
         {
             yield return new WaitForSeconds(currentSpawnRate);
 
+            // 스폰 가능한 적 목록이 비어있는지 확인합니다.
+            if (spawnableEnemyTypes == null || spawnableEnemyTypes.Count == 0)
+            {
+                Debug.LogWarning("스폰할 적 유형이 없습니다. EnemySpawner의 목록을 확인해주세요.");
+                continue; // 다음 프레임까지 기다리지 않고 다음 루프로 넘어갑니다.
+            }
+
+            // 목록에서 무작위로 적 유형을 선택합니다.
+            EnemyData chosenEnemyData = spawnableEnemyTypes[Random.Range(0, spawnableEnemyTypes.Count)];
+            
             Vector3 spawnPosition = GetRandomSpawnPosition();
-            GameObject enemyObject = ObjectPooler.Instance.SpawnFromPool(enemyTag, spawnPosition, Quaternion.identity);
+            
+            // 선택된 적의 poolType을 사용하여 오브젝트 풀에서 가져옵니다.
+            GameObject enemyObject = ObjectPooler.Instance.SpawnFromPool(chosenEnemyData.poolType, spawnPosition, Quaternion.identity);
 
             if (enemyObject != null)
             {
                 Enemy enemy = enemyObject.GetComponent<Enemy>();
                 if (enemy != null)
                 {
-                    enemy.SetMoveSpeed(currentEnemySpeed);
+                    // 적에게 EnemyData와 현재 난이도가 적용된 속도, 생성 반경을 전달합니다.
+                    enemy.Initialize(chosenEnemyData, currentEnemySpeed, spawnRadius);
                 }
             }
         }
@@ -63,13 +70,11 @@ public class EnemySpawner : MonoBehaviour
         {
             yield return new WaitForSeconds(difficultyIncreaseInterval);
 
-            // Decrease spawn rate
             if (currentSpawnRate > minSpawnRate)
             {
                 currentSpawnRate = Mathf.Max(currentSpawnRate - spawnRateReduction, minSpawnRate);
             }
 
-            // Increase enemy speed
             if (currentEnemySpeed < maxEnemySpeed)
             {
                 currentEnemySpeed = Mathf.Min(currentEnemySpeed + speedIncrease, maxEnemySpeed);
@@ -79,40 +84,17 @@ public class EnemySpawner : MonoBehaviour
 
     private Vector3 GetRandomSpawnPosition()
     {
-        int edge = Random.Range(0, 4);
-        Vector2 viewportPoint = Vector2.zero;
-
-        switch (edge)
-        {
-            case 0: // Top
-                viewportPoint = new Vector2(Random.Range(0f, 1f), 1 + spawnOffset);
-                break;
-            case 1: // Bottom
-                viewportPoint = new Vector2(Random.Range(0f, 1f), 0 - spawnOffset);
-                break;
-            case 2: // Left
-                viewportPoint = new Vector2(0 - spawnOffset, Random.Range(0f, 1f));
-                break;
-            case 3: // Right
-                viewportPoint = new Vector2(1 + spawnOffset, Random.Range(0f, 1f));
-                break;
-        }
-
-        Vector3 worldPoint = mainCamera.ViewportToWorldPoint(viewportPoint);
-        worldPoint.z = 0;
-
-        return worldPoint;
+        float randomAngle = Random.Range(0f, 360f) * Mathf.Deg2Rad;
+        float x = Mathf.Cos(randomAngle) * spawnRadius;
+        float y = Mathf.Sin(randomAngle) * spawnRadius;
+        return new Vector3(x, y, 0);
     }
+    
     public void ResetSpawner()
     {
-        // 모든 코루틴을 중지하여 기존의 적 생성 및 난이도 증가를 멈춤
         StopAllCoroutines();
-
-        // 난이도 관련 변수들을 초기값으로 리셋
         currentSpawnRate = initialSpawnRate;
         currentEnemySpeed = initialEnemySpeed;
-        
-        // 초기화된 값으로 코루틴을 다시 시작
         StartCoroutine(SpawnEnemyRoutine());
         StartCoroutine(IncreaseDifficultyRoutine());
     }

@@ -1,49 +1,59 @@
 using UnityEngine;
-using TMPro; // TextMeshPro 사용을 위해 추가
+using UnityEngine.UI;
+using TMPro;
 
+/// <summary>
+/// 모든 적의 공통 행동을 정의하는 MonoBehaviour입니다.
+/// 실제 능력치는 EnemyData ScriptableObject를 통해 주입받습니다.
+/// </summary>
+[RequireComponent(typeof(SpriteRenderer))] // SpriteRenderer가 필수 컴포넌트임을 명시
 public class Enemy : MonoBehaviour
 {
-    [Header("Enemy Stats")]
-    [SerializeField] private float baseMoveSpeed = 5f;
-    [SerializeField] private int scoreValue = 10;
+    // --- Public Properties ---
+    public EnemyData Data { get; private set; }
 
-    [Header("Pooling")]
-    [SerializeField] private string enemyTag = "Enemy";
-    [SerializeField] private string destructionEffectTag = "DestructionEffect";
-    
-    [Header("Off-screen Indicator")]
-    [SerializeField] private string indicatorTag = "DistanceIndicator";
-    
-    private float moveSpeed;
+    // --- Private State ---
+    private float currentMoveSpeed;
+    private float maxColorDistance; // 스포너로부터 받아오는 최대 거리 (생성 반경)
     private Vector3 targetPosition = Vector3.zero;
     
-    // Indicator-related variables
+    // --- Cached Components & References ---
     private GameObject indicatorInstance;
     private TextMeshProUGUI indicatorText;
+    private Image indicatorImage;
     private Camera mainCamera;
     private Transform canvasTransform;
+    private SpriteRenderer spriteRenderer; // 적의 외형을 바꿀 SpriteRenderer
+
+    private void Awake()
+    {
+        // 프리팹 자체에 있는 컴포넌트는 Awake에서 캐싱하는 것이 효율적입니다.
+        spriteRenderer = GetComponent<SpriteRenderer>();
+    }
+
+    /// <summary>
+    /// 스포너에 의해 호출되어 적의 데이터를 설정하고 동적 상태를 초기화합니다.
+    /// </summary>
+    public void Initialize(EnemyData data, float dynamicSpeed, float spawnRadius)
+    {
+        this.Data = data;
+        this.currentMoveSpeed = dynamicSpeed;
+        this.maxColorDistance = spawnRadius;
+
+        // 데이터에 따라 스프라이트를 설정합니다.
+        if (spriteRenderer != null && Data.enemySprite != null)
+        {
+            spriteRenderer.sprite = Data.enemySprite;
+        }
+    }
 
     private void OnEnable()
     {
-        moveSpeed = baseMoveSpeed;
-
+        // 캐싱되지 않은 경우에만 컴포넌트와 오브젝트를 찾습니다.
         if (mainCamera == null)
         {
             mainCamera = Camera.main;
             canvasTransform = FindFirstObjectByType<Canvas>()?.transform;
-        }
-
-        if (ObjectPooler.Instance != null && canvasTransform != null)
-        {
-            indicatorInstance = ObjectPooler.Instance.SpawnFromPool(indicatorTag, Vector3.zero, Quaternion.identity);
-            if (indicatorInstance != null)
-            {
-                indicatorInstance.transform.SetParent(canvasTransform, false);
-                indicatorText = indicatorInstance.GetComponentInChildren<TextMeshProUGUI>();
-                
-                // 깜빡임 현상을 막기 위해, 생성 시점에는 우선 비활성화합니다.
-                indicatorInstance.SetActive(false);
-            }
         }
     }
 
@@ -52,44 +62,87 @@ public class Enemy : MonoBehaviour
         // 오브젝트가 비활성화될 때, 사용하던 표시기를 풀에 반환합니다.
         if (ObjectPooler.Instance != null && indicatorInstance != null)
         {
-            ObjectPooler.Instance.ReturnToPool(indicatorTag, indicatorInstance);
+            if(Data != null)
+            {
+                ObjectPooler.Instance.ReturnToPool(Data.indicatorType, indicatorInstance);
+            }
             indicatorInstance = null;
         }
+        
+        // Data 참조를 리셋하여 풀에서 재사용될 때를 대비합니다.
+        Data = null;
     }
 
     void Update()
     {
-        // 이동
-        transform.position = Vector3.MoveTowards(transform.position, targetPosition, moveSpeed * Time.deltaTime);
+        // Data가 없으면 움직이지 않습니다.
+        if (Data == null) return;
 
-        // 회전 (이동 방향을 바라보도록)
+        transform.position = Vector3.MoveTowards(transform.position, targetPosition, currentMoveSpeed * Time.deltaTime);
+
         Vector3 direction = targetPosition - transform.position;
-        if (direction != Vector3.zero) // 0으로 나누는 것을 방지
+        if (direction != Vector3.zero)
         {
             float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
-            transform.rotation = Quaternion.Euler(0, 0, angle + 90); // +90도 오프셋은 스프라이트의 '위쪽'이 앞을 향하게 함
+            transform.rotation = Quaternion.Euler(0, 0, angle + 90);
         }
     }
 
     void LateUpdate()
     {
-        // 모든 이동 계산이 끝난 후, 표시기 위치를 계산하고 보여줍니다.
+        // Data가 아직 할당되지 않았다면 아무것도 하지 않습니다.
+        if (Data == null) return;
+        
+        // 표시기 인스턴스가 없으면 생성합니다.
+        if (indicatorInstance == null)
+        {
+            CreateIndicator();
+        }
+        
         HandleIndicator();
+    }
+
+    /// <summary>
+    /// 표시기 오브젝트를 풀에서 가져와 설정합니다.
+    /// </summary>
+    private void CreateIndicator()
+    {
+        if (ObjectPooler.Instance != null && canvasTransform != null)
+        {
+            // indicatorType이 None이 아닌 경우에만 표시기를 생성합니다.
+            if (Data.indicatorType != PoolObjectType.None)
+            {
+                indicatorInstance = ObjectPooler.Instance.SpawnFromPool(Data.indicatorType, Vector3.zero, Quaternion.identity);
+                if (indicatorInstance != null)
+                {
+                    indicatorInstance.transform.SetParent(canvasTransform, false);
+                    indicatorText = indicatorInstance.GetComponentInChildren<TextMeshProUGUI>();
+                    indicatorImage = indicatorInstance.GetComponentInChildren<Image>();
+                    indicatorInstance.SetActive(false);
+                }
+            }
+        }
     }
 
     private void HandleIndicator()
     {
         if (indicatorInstance == null || mainCamera == null) return;
         
-        // 표시기를 활성화합니다.
         indicatorInstance.SetActive(true);
 
         float distance = Vector3.Distance(transform.position, Vector3.zero);
+        
         if (indicatorText != null)
         {
             indicatorText.text = distance.ToString("F0") + "M";
         }
 
+        if (indicatorImage != null)
+        {
+            float t = Mathf.InverseLerp(Data.minColorDistance, maxColorDistance, distance);
+            indicatorImage.color = Color.Lerp(Data.nearColor, Data.farColor, t);
+        }
+        
         Vector3 viewportPos = mainCamera.WorldToViewportPoint(transform.position);
         Vector3 indicatorScreenPosition;
         
@@ -111,29 +164,27 @@ public class Enemy : MonoBehaviour
         
         indicatorInstance.transform.position = indicatorScreenPosition;
     }
-    
-    public void SetMoveSpeed(float newSpeed)
-    {
-        moveSpeed = newSpeed;
-    }
 
     private void OnTriggerEnter2D(Collider2D other)
     {
+        if (Data == null) return;
+
         if (other.CompareTag("Player"))
         {
-            GameManager.Instance.AddScore(scoreValue);
+            GameManager.Instance.AddScore(Data.scoreValue);
 
-            if (!string.IsNullOrEmpty(destructionEffectTag))
+            // 파괴 이펙트 타입이 설정되어 있을 경우에만 스폰합니다.
+            if (Data.destructionEffectType != PoolObjectType.None)
             {
-                ObjectPooler.Instance.SpawnFromPool(destructionEffectTag, transform.position, Quaternion.identity);
+                ObjectPooler.Instance.SpawnFromPool(Data.destructionEffectType, transform.position, Quaternion.identity);
             }
             
-            ObjectPooler.Instance.ReturnToPool(enemyTag, gameObject);
+            ObjectPooler.Instance.ReturnToPool(Data.poolType, gameObject);
         }
         else if (other.CompareTag("Core"))
         {
             GameManager.Instance.LoseLife();
-            ObjectPooler.Instance.ReturnToPool(enemyTag, gameObject);
+            ObjectPooler.Instance.ReturnToPool(Data.poolType, gameObject);
         }
     }
 }

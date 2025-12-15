@@ -1,12 +1,14 @@
 using UnityEngine;
 using UnityEngine.UI; // UI 컴포넌트 사용을 위해 추가
 using UnityEngine.SceneManagement;
+using TMPro; // TextMeshPro 사용을 위해 추가
 
 public class MainMenu : MonoBehaviour
 {
     // Inspector에서 버튼을 할당할 수 있도록 private 변수로 선언합니다.
     [SerializeField] private Button startButton;
     [SerializeField] private Button quitButton;
+    [SerializeField] private TextMeshProUGUI highScoreText; // 최고 기록을 표시할 텍스트
 
     void Start()
     {
@@ -19,6 +21,21 @@ public class MainMenu : MonoBehaviour
         if (quitButton != null)
         {
             quitButton.onClick.AddListener(QuitGame);
+        }
+
+        // 최고 기록을 불러와서 표시합니다.
+        DisplayHighScore();
+    }
+
+    private void DisplayHighScore()
+    {
+        if (highScoreText != null)
+        {
+            // JsonDataManager를 사용하여 자동 저장된 GameData를 불러옵니다.
+            GameData savedData = JsonDataManager.LoadFromJson<GameData>("GameData_AutoSave.json");
+            
+            // 저장된 데이터가 있다면 최고 기록을, 없다면 0을 표시합니다.
+            highScoreText.text = "최고 기록: " + (savedData != null ? savedData.highScore : 0);
         }
     }
 

@@ -3,11 +3,21 @@ using UnityEngine;
 
 public class ObjectPooler : MonoBehaviour
 {
+    // A container to hold both the queue of inactive objects and a list of all created objects for a pool
+    private class PoolContainer
+    {
+        public Queue<GameObject> InactiveObjects { get; } = new Queue<GameObject>();
+        public List<GameObject> AllCreatedObjects { get; } = new List<GameObject>();
+    }
+
     [System.Serializable]
     public class Pool
     {
-        public string tag;
+        [Tooltip("오브젝트의 유형 (Enum)")]
+        public PoolObjectType type;
+        [Tooltip("해당 유형으로 스폰될 프리팹")]
         public GameObject prefab;
+        [Tooltip("초기 풀 크기")]
         public int size;
     }
 
@@ -27,65 +37,61 @@ public class ObjectPooler : MonoBehaviour
     }
     #endregion
 
+    [Tooltip("에디터에서 설정할 오브젝트 풀 목록")]
     public List<Pool> pools;
-    public Dictionary<string, Queue<GameObject>> poolDictionary;
+    
+    // The dictionary now holds the more complex PoolContainer
+    private Dictionary<PoolObjectType, PoolContainer> poolDictionary;
 
     void Start()
     {
-        poolDictionary = new Dictionary<string, Queue<GameObject>>();
+        poolDictionary = new Dictionary<PoolObjectType, PoolContainer>();
 
         foreach (Pool pool in pools)
         {
-            Queue<GameObject> objectQueue = new Queue<GameObject>();
-
+            var poolContainer = new PoolContainer();
             for (int i = 0; i < pool.size; i++)
             {
                 GameObject obj = Instantiate(pool.prefab);
                 obj.SetActive(false);
-                objectQueue.Enqueue(obj);
+                poolContainer.InactiveObjects.Enqueue(obj);
+                poolContainer.AllCreatedObjects.Add(obj);
             }
-
-            poolDictionary.Add(pool.tag, objectQueue);
+            poolDictionary.Add(pool.type, poolContainer);
         }
     }
 
-    public GameObject SpawnFromPool(string tag, Vector3 position, Quaternion rotation)
+    public GameObject SpawnFromPool(PoolObjectType type, Vector3 position, Quaternion rotation)
     {
-        if (!poolDictionary.ContainsKey(tag))
+        if (!poolDictionary.TryGetValue(type, out var poolContainer))
         {
-            Debug.LogWarning("Pool with tag " + tag + " doesn't exist.");
+            Debug.LogWarning("Pool with type " + type + " doesn't exist.");
             return null;
         }
 
-        Queue<GameObject> poolQueue = poolDictionary[tag];
-
-        // 풀이 비어있을 경우, 동적으로 확장합니다.
-        if (poolQueue.Count == 0)
+        // If the pool is empty, expand it
+        if (poolContainer.InactiveObjects.Count == 0)
         {
-            // 해당 태그를 가진 Pool 설정을 찾습니다.
-            Pool p = pools.Find(pool => pool.tag == tag);
+            Pool p = pools.Find(pool => pool.type == type);
             if (p != null)
             {
-                // 풀이 비어있으므로 새 오브젝트를 생성하여 확장합니다.
-                Debug.LogWarning($"Pool with tag '{tag}' is empty. Expanding pool.");
-                p.size++; // 에디터에서 추적할 수 있도록 풀 크기를 증가시킵니다.
+                Debug.LogWarning($"Pool with type '{type}' is empty. Expanding pool.");
+                p.size++;
                 
                 GameObject newObj = Instantiate(p.prefab);
-                // 새롭게 생성된 오브젝트도 풀링 시스템의 관리를 받게 됩니다.
-                // 이 오브젝트가 ReturnToPool을 통해 반환되면, 큐에 추가되어 풀의 전체 크기가 늘어납니다.
+                poolContainer.AllCreatedObjects.Add(newObj); // Track the new object
+                
                 newObj.SetActive(true);
                 newObj.transform.position = position;
                 newObj.transform.rotation = rotation;
                 return newObj;
             }
             
-            // Pool 설정을 찾지 못한 경우
-            Debug.LogError($"Pool with tag '{tag}' is empty and its prefab could not be found to expand.");
+            Debug.LogError($"Pool with type '{type}' is empty and its prefab could not be found to expand.");
             return null;
         }
 
-        GameObject objectToSpawn = poolQueue.Dequeue();
-
+        GameObject objectToSpawn = poolContainer.InactiveObjects.Dequeue();
         objectToSpawn.SetActive(true);
         objectToSpawn.transform.position = position;
         objectToSpawn.transform.rotation = rotation;
@@ -93,16 +99,37 @@ public class ObjectPooler : MonoBehaviour
         return objectToSpawn;
     }
 
-    public void ReturnToPool(string tag, GameObject objectToReturn)
+    public void ReturnToPool(PoolObjectType type, GameObject objectToReturn)
     {
-        if (!poolDictionary.ContainsKey(tag))
+        if (!poolDictionary.TryGetValue(type, out var poolContainer))
         {
-            Debug.LogWarning("Pool with tag " + tag + " doesn't exist.");
-            Destroy(objectToReturn); // Or just disable it
+            Debug.LogWarning("Pool with type " + type + " doesn't exist. Destroying object.");
+            Destroy(objectToReturn);
             return;
         }
 
         objectToReturn.SetActive(false);
-        poolDictionary[tag].Enqueue(objectToReturn);
+        poolContainer.InactiveObjects.Enqueue(objectToReturn);
+    }
+
+    /// <summary>
+    /// 모든 풀에서 현재 활성화된 모든 오브젝트를 비활성화하고 풀에 반환합니다.
+    /// </summary>
+    public void ReturnAllToPool()
+    {
+        foreach(var pair in poolDictionary)
+        {
+            var poolType = pair.Key;
+            var container = pair.Value;
+            
+            // This is more efficient than FindGameObjectsWithTag
+            foreach(var obj in container.AllCreatedObjects)
+            {
+                if(obj != null && obj.activeInHierarchy)
+                {
+                    ReturnToPool(poolType, obj);
+                }
+            }
+        }
     }
 }

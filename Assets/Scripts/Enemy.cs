@@ -30,7 +30,7 @@ public class Enemy : MonoBehaviour
         if (mainCamera == null)
         {
             mainCamera = Camera.main;
-            canvasTransform = FindObjectOfType<Canvas>()?.transform;
+            canvasTransform = FindFirstObjectByType<Canvas>()?.transform;
         }
 
         if (ObjectPooler.Instance != null && canvasTransform != null)

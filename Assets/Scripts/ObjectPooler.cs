@@ -59,27 +59,29 @@ public class ObjectPooler : MonoBehaviour
 
         Queue<GameObject> poolQueue = poolDictionary[tag];
 
+        // 풀이 비어있을 경우, 동적으로 확장합니다.
         if (poolQueue.Count == 0)
         {
-            // Optionally, expand the pool if it's empty.
-            // For now, we'll just log a warning, but you could instantiate a new object.
-            // This behavior depends on the design choice for the game.
-            // Let's find the pool to get the prefab.
+            // 해당 태그를 가진 Pool 설정을 찾습니다.
             Pool p = pools.Find(pool => pool.tag == tag);
             if (p != null)
             {
-                GameObject obj = Instantiate(p.prefab);
-                // Return it directly without enqueuing/dequeuing, or expand the pool.
-                // For simplicity, we'll just use it and it won't be pooled.
-                // A more robust system might add it to the pool structure.
-                obj.transform.position = position;
-                obj.transform.rotation = rotation;
-                return obj;
+                // 풀이 비어있으므로 새 오브젝트를 생성하여 확장합니다.
+                Debug.LogWarning($"Pool with tag '{tag}' is empty. Expanding pool.");
+                p.size++; // 에디터에서 추적할 수 있도록 풀 크기를 증가시킵니다.
+                
+                GameObject newObj = Instantiate(p.prefab);
+                // 새롭게 생성된 오브젝트도 풀링 시스템의 관리를 받게 됩니다.
+                // 이 오브젝트가 ReturnToPool을 통해 반환되면, 큐에 추가되어 풀의 전체 크기가 늘어납니다.
+                newObj.SetActive(true);
+                newObj.transform.position = position;
+                newObj.transform.rotation = rotation;
+                return newObj;
             }
-
-             Debug.LogWarning("Pool with tag " + tag + " is empty and prefab could not be found.");
+            
+            // Pool 설정을 찾지 못한 경우
+            Debug.LogError($"Pool with tag '{tag}' is empty and its prefab could not be found to expand.");
             return null;
-
         }
 
         GameObject objectToSpawn = poolQueue.Dequeue();
